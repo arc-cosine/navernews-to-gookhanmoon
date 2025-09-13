@@ -31,17 +31,17 @@ app.use((req, res, next) => {
     // 요청별 타임아웃 설정
     req.setTimeout(PROXY_TIMEOUT);
     res.setTimeout(PROXY_TIMEOUT);
-
+    
     const timeout = setTimeout(() => {
         if (!res.headersSent) {
             console.error(`Request timeout: ${req.url}`);
             res.status(408).send('Request timeout');
         }
     }, PROXY_TIMEOUT);
-
+    
     res.on('finish', () => clearTimeout(timeout));
     res.on('close', () => clearTimeout(timeout));
-
+    
     next();
 });
 
@@ -89,7 +89,7 @@ app.get('/manifest.json', (req, res) => {
             }
         ]
     };
-
+    
     res.setHeader('Cache-Control', 'public, max-age=86400'); // 24시간 캐시
     res.json(manifest);
 });
@@ -283,12 +283,12 @@ function processAspNetForm(html, baseUrl) {
 app.get('/proxy', async (req, res) => {
     const startTime = Date.now();
     const targetUrl = req.query.url || TARGET_SITE;
-
+    
     console.log(`[GET] Starting proxy request to: ${targetUrl}`);
 
     try {
         const axiosInstance = createAxiosInstance();
-
+        
         const response = await axiosInstance.get(targetUrl, {
             headers: {
                 'Accept': req.headers.accept || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -316,9 +316,9 @@ app.get('/proxy', async (req, res) => {
     } catch (error) {
         const duration = Date.now() - startTime;
         const errorInfo = handleAxiosError(error, targetUrl);
-
+        
         console.error(`[GET] Request failed after ${duration}ms: ${errorInfo.message}`);
-
+        
         // 사용자 친화적 에러 페이지
         const errorHtml = `
         <!DOCTYPE html>
@@ -337,7 +337,7 @@ app.get('/proxy', async (req, res) => {
         </body>
         </html>
         `;
-
+        
         res.status(errorInfo.status).send(errorHtml);
     }
 });
@@ -346,7 +346,7 @@ app.get('/proxy', async (req, res) => {
 app.post('/proxy', async (req, res) => {
     const startTime = Date.now();
     const targetUrl = req.query.url;
-
+    
     if (!targetUrl) {
         return res.status(400).send('URL parameter required');
     }
@@ -355,7 +355,7 @@ app.post('/proxy', async (req, res) => {
 
     try {
         const axiosInstance = createAxiosInstance();
-
+        
         const response = await axiosInstance.post(targetUrl, req.body, {
             headers: {
                 'Accept': req.headers.accept || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -384,7 +384,7 @@ app.post('/proxy', async (req, res) => {
     } catch (error) {
         const duration = Date.now() - startTime;
         const errorInfo = handleAxiosError(error, targetUrl);
-
+        
         console.error(`[POST] Request failed after ${duration}ms: ${errorInfo.message}`);
         res.status(errorInfo.status).send(`Error: ${errorInfo.message}`);
     }
@@ -404,7 +404,7 @@ app.get('/resource', async (req, res) => {
 
     try {
         const axiosInstance = createAxiosInstance();
-
+        
         const response = await axiosInstance.get(targetUrl, {
             headers: {
                 'Accept': '*/*',
@@ -417,10 +417,10 @@ app.get('/resource', async (req, res) => {
         if (response.headers['content-type']) {
             res.setHeader('Content-Type', response.headers['content-type']);
         }
-
+        
         // 캐시 설정
         res.setHeader('Cache-Control', 'public, max-age=3600');
-
+        
         res.send(response.data);
 
     } catch (error) {
@@ -429,13 +429,45 @@ app.get('/resource', async (req, res) => {
     }
 });
 
-// Health check endpoint
+// Health check endpoint (더 상세한 정보)
 app.get('/health', (req, res) => {
     res.status(200).json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        environment: isKoyeb ? 'koyeb' : 'local',
-        timeout: REQUEST_TIMEOUT
+        environment: isLocal ? 'local' : 'production',
+        timeout: REQUEST_TIMEOUT,
+        proxy_timeout: PROXY_TIMEOUT,
+        cache_size: cache.size,
+        uptime: process.uptime(),
+        memory: process.memoryUsage()
+    });
+});
+
+// 캐시 정보 확인용 엔드포인트 (디버깅용)
+app.get('/debug/cache', (req, res) => {
+    const cacheInfo = [];
+    for (const [key, value] of cache.entries()) {
+        cacheInfo.push({
+            key: key.length > 100 ? key.substring(0, 100) + '...' : key,
+            age: Math.floor((Date.now() - value.timestamp) / 1000),
+            size: typeof value.data === 'string' ? value.data.length : 'unknown'
+        });
+    }
+    
+    res.json({
+        cache_entries: cacheInfo,
+        total_entries: cache.size,
+        cache_duration_minutes: CACHE_DURATION / 60000
+    });
+});
+
+// 캐시 클리어 엔드포인트
+app.post('/debug/clear-cache', (req, res) => {
+    const oldSize = cache.size;
+    cache.clear();
+    res.json({
+        message: 'Cache cleared',
+        cleared_entries: oldSize
     });
 });
 
@@ -446,8 +478,8 @@ app.get('/', (req, res) => {
 });
 
 // 서버 시작
-app.listen(port, 'localhost', () => {
-    console.log(`네이버 뉴스 PWA 프록시 서버가 http://localhost:${port} 에서 실행중입니다`);
+app.listen(port, '0.0.0.0', () => {
+    console.log(`네이버 뉴스 PWA 프록시 서버가 http://0.0.0.0:${port} 에서 실행중입니다`);
     console.log(`환경: ${isKoyeb ? 'Koyeb 프로덕션' : '로컬 개발'}`);
     console.log(`복제 대상: ${TARGET_SITE}`);
     console.log(`요청 타임아웃: ${REQUEST_TIMEOUT}ms`);
